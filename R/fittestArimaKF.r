@@ -33,8 +33,8 @@ fittestArimaKF <-
     # used by the optim function to optimize the choice of model parameters
     # may also return the model if estimate is FALSE
     likfn <- function(pars, model, p, q, d, estimate=TRUE){
-      tmp <- try(SSMarima(ar=artransform(pars[1:p]),
-                          ma=artransform(pars[(p+1):(p+q)]),d=d,Q = exp(pars[(p+q+1)])),silent=TRUE)    
+      tmp <- try(SSMarima(ar=artransform(pars[seq_len(p)]),
+                          ma=artransform(pars[p+seq_len(q)]),d=d,Q = exp(pars[(p+q+1)])),silent=TRUE)    
       if(!inherits(tmp,"try-error")){
         model["T","arima"] <- tmp$T 
         model["R","arima"] <- tmp$R    
@@ -65,7 +65,8 @@ fittestArimaKF <-
       d <- fitARIMA$arma[6]
       if(d==0) npar <- npar+1
       
-      return(list(ar.coef=ar.coef,ma.coef=ma.coef,p=p,q=q,d=d,npar=npar))
+      return(list(ar.coef=ar.coef,ma.coef=ma.coef,p=p,q=q,d=d,npar=npar,
+                  fitARIMA = fitARIMA))
     }
     
     #optimize ARIMA State Space Model given a set of initial parameters
@@ -209,7 +210,8 @@ fittestArimaKF <-
     errors.measures <- switch(is.null(pred.measures$errors)+1,lapply(pred.measures$errors,identity),NULL)
     
     #append results in a list
-    results <- c( list(model=model_arima), initQ=initQ.optim, fit.measures, list(pred=prediction), errors.measures )
+    results <- c( list(model=model_arima), initQ=initQ.optim, fit.measures, list(pred=prediction), errors.measures,
+                  initPar = list(initPar))
     if(!is.null(rank) ) results <- c(results, list(rank.val=rank), rank.by=rank.by)
     
     return(results)
