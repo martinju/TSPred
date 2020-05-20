@@ -1,5 +1,6 @@
 fittestArimaKF <- 
-  function(timeseries, timeseries.test=NULL, h=NULL, na.action=na.omit, level=0.9, filtered = TRUE, initQ=NULL,
+  function(timeseries, timeseries.test=NULL, h=NULL, na.action=na.omit, level=0.9, filtered = TRUE, initQ=0,
+           update.H = F,initH = 0,
            rank.by=c("MSE","NMSE","MAPE","sMAPE","MaxError","AIC","AICc","BIC","logLik","errors","fitness"), ...){
     if(is.null(timeseries))    stop("timeseries is required and must have positive length")
     if(is.null(timeseries.test) & is.null(h)) stop("the number of values to be predicted is unknown, provide either timeseries.test or h")
@@ -22,7 +23,7 @@ fittestArimaKF <-
         }
       }
     }
-    else n.ahead <- h
+    else n.ahead <- max(n.ahead,5)
     
     # evaluate choices of rank.by
     rank.by <- match.arg(rank.by)
@@ -32,7 +33,7 @@ fittestArimaKF <-
     # function to return the log-likelihood of an ARIMA State Space Model given a set of parameters
     # used by the optim function to optimize the choice of model parameters
     # may also return the model if estimate is FALSE
-    likfn <- function(pars, model, p, q, d, estimate=TRUE){
+    likfn <- function(pars, model, p, q, d, estimate=TRUE,update.H= FALSE){
       tmp <- try(SSMarima(ar=artransform(pars[seq_len(p)]),
                           ma=artransform(pars[p+seq_len(q)]),d=d,Q = exp(pars[(p+q+1)])),silent=TRUE)    
       if(!inherits(tmp,"try-error")){
@@ -40,6 +41,9 @@ fittestArimaKF <-
         model["R","arima"] <- tmp$R    
         model["P1","arima"] <- tmp$P1
         model["Q","arima"] <- tmp$Q
+        if (update.H){
+          model["H"] <- exp(pars[(p+q+2)])
+        }
         if(estimate){
           -logLik(model)
         } else model
@@ -70,14 +74,20 @@ fittestArimaKF <-
     }
     
     #optimize ARIMA State Space Model given a set of initial parameters
-    optim.model <- function(timeseries, initPar, initQ, likfn){
+    optim.model <- function(timeseries, initPar, initQ, initH,likfn,update.H){
       #generates initial ARIMA State Space Model
-      model <- KFAS::SSModel(timeseries ~ SSMarima(ar=initPar$ar.coef,ma=initPar$ma.coef,d=initPar$d), H=0)
+      model <- KFAS::SSModel(timeseries ~ SSMarima(ar=initPar$ar.coef,ma=initPar$ma.coef,d=initPar$d), H=initH)
       
       #optimizes the model parameters based on initial values 
-      inits <- c(initPar$ar.coef,initPar$ma.coef,initQ)
-      fit <- optim(par=inits, fn=likfn, model=model, p=initPar$p, q=initPar$q, d=initPar$d, method='BFGS')
-      model_arima <- likfn(pars=fit$par,model=model, p=initPar$p, q=initPar$q, d=initPar$d, estimate=FALSE)
+      if(update.H){
+        inits <- c(initPar$ar.coef,initPar$ma.coef,initQ,initH)
+      } else {
+        inits <- c(initPar$ar.coef,initPar$ma.coef,initQ)
+      }
+      fit <- optim(par=inits, fn=likfn, model=model, p=initPar$p, q=initPar$q,
+                   d=initPar$d, update.H = update.H, method='BFGS')
+      model_arima <- likfn(pars=fit$par,model=model, p=initPar$p, q=initPar$q,
+                           d=initPar$d, update.H = update.H, estimate=FALSE)
       
       return(model_arima)
     }
@@ -138,14 +148,15 @@ fittestArimaKF <-
     rank <- NULL
     if(is.null(initQ)){
       # creates the Validation series for parameter optimization
+      
       ts.val <- tail(ts,n.ahead)
-      ts.tmp <- head(ts,nobs-n.ahead)
+      ts.tmp <- head(ts,n.ahead)
       
       #if rank.by considers fitness measures, parameter optimization uses only and all the training series
       if(any(c("AIC","AICc","BIC","logLik") %in% rank.by)) ts.tmp <- ts
       
       #initial options of Q
-      initQ.opt <- c(log(var(ts.tmp)),0)
+      initQ.opt <- c(log(var(ts.tmp,na.rm=T)),0)
       
       #initial arima parameters
       initPar <- arima.par(ts.tmp,...)
@@ -194,7 +205,7 @@ fittestArimaKF <-
     }
     #generates and optimizes Model based on optim parameter values
     else{
-      model_arima <- optim.model(ts, initPar, initQ.optim, likfn)
+      model_arima <- optim.model(ts, initPar, initQ.optim, initH, likfn,update.H)
     }
     
     #computes fitness measures and returns a dataframe with them
